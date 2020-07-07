@@ -207,7 +207,7 @@ class CreateBase < ActiveRecord::Migration[4.2]
       t.references :user, null: false
       t.timestamps limit: 3, null: false
     end
-    add_index :authorizations, %i[uid provider]
+    add_index :authorizations, %i[uid provider], unique: true
     add_index :authorizations, [:user_id]
     add_index :authorizations, [:username]
     add_foreign_key :authorizations, :users
@@ -724,5 +724,21 @@ class CreateBase < ActiveRecord::Migration[4.2]
     end
     add_index :active_job_locks, :lock_key, unique: true
     add_index :active_job_locks, :active_job_id, unique: true
+
+    create_table :smime_certificates do |t|
+      t.string :subject,            limit: 500,  null: false
+      t.string :doc_hash,           limit: 250,  null: false
+      t.string :fingerprint,        limit: 250,  null: false
+      t.string :modulus,            limit: 1024, null: false
+      t.datetime :not_before_at,                 null: true
+      t.datetime :not_after_at,                  null: true
+      t.binary :raw,                limit: 10.megabytes,  null: false
+      t.binary :private_key,        limit: 10.megabytes,  null: true
+      t.string :private_key_secret, limit: 500,  null: true
+      t.timestamps limit: 3, null: false
+    end
+    add_index :smime_certificates, [:fingerprint], unique: true
+    add_index :smime_certificates, [:modulus]
+    add_index :smime_certificates, [:subject]
   end
 end

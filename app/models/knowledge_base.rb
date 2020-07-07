@@ -26,8 +26,9 @@ class KnowledgeBase < ApplicationModel
   validates :category_layout, inclusion: { in: KnowledgeBase::LAYOUTS }
   validates :homepage_layout, inclusion: { in: KnowledgeBase::LAYOUTS }
 
-  validates :color_highlight, presence: true
-  validates :color_header, presence: true
+  validates :color_highlight, presence: true, color: true
+  validates :color_header,    presence: true, color: true
+
   validates :iconset, inclusion: { in: KnowledgeBase::ICONSETS }
 
   scope :active, -> { where(active: true) }
@@ -53,7 +54,7 @@ class KnowledgeBase < ApplicationModel
 
     data[:KnowledgeBase].each do |_, elem|
       elem.delete_if do |k, _|
-        k.match?(/_ids$/)
+        k.end_with?('_ids')
       end
     end
 
@@ -63,7 +64,9 @@ class KnowledgeBase < ApplicationModel
   def custom_address_uri
     return nil if custom_address.blank?
 
-    URI("protocol://#{custom_address}")
+    scheme = Setting.get('http_type') || 'http'
+
+    URI("#{scheme}://#{custom_address}")
   rescue URI::InvalidURIError
     nil
   end

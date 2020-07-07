@@ -94,8 +94,8 @@ class App.ControllerForm extends App.Controller
 
     for attributeName, attribute of attributesClean
 
-      # ignore read only attributes
-      if !attribute.readonly
+      # ignore read only or not rendered attributes attributes
+      if !attribute.readonly && !attribute.skipRendering
 
         # check generic filter
         if @filter && !attribute.filter
@@ -361,7 +361,7 @@ class App.ControllerForm extends App.Controller
       return item
     else
       placeholderObjects = {}
-      if @model.className && !_.isEmpty(attribute.linktemplate) && !_.isEmpty(@params[attribute.name])
+      if @model.className && @params && !_.isEmpty(attribute.linktemplate) && !_.isEmpty(@params[attribute.name])
         placeholderObjects = { attribute: attribute, session: App.Session.get(), config: App.Config.all() }
         placeholderObjects[@model.className.toLowerCase()] = @params
       fullItem = $(

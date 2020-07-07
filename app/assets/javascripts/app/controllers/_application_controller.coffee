@@ -281,11 +281,6 @@ class App.Controller extends Spine.Controller
     return true if @Session.get()
     false
 
-  frontendTime: (timestamp, row = {}) ->
-    if !row['subclass']
-      row['subclass'] = ''
-    "<span class=\"humanTimeFromNow #{row.subclass}\" data-time=\"#{timestamp}\">?</span>"
-
   frontendTimeUpdate: =>
     update = =>
       @frontendTimeUpdateElement($('#app'))
@@ -299,7 +294,7 @@ class App.Controller extends Spine.Controller
     )
 
   frontendTimeUpdateItem: (item, currentVal) =>
-    timestamp = item.data('time')
+    timestamp = item.attr('datetime')
     time      = @humanTime(timestamp, item.hasClass('escalation'))
 
     # only do dom updates on changes
@@ -667,6 +662,14 @@ class App.ControllerModal extends App.Controller
     e.preventDefault()
     @clearAlerts()
     @onSubmit(e)
+
+  startLoading: =>
+    @$('.modal-body').addClass('hide')
+    @$('.modal-loader').removeClass('hide')
+
+  stopLoading: =>
+    @$('.modal-body').removeClass('hide')
+    @$('.modal-loader').addClass('hide')
 
 class App.SessionMessage extends App.ControllerModal
   showTrySupport: true

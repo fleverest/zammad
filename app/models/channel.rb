@@ -12,6 +12,8 @@ class Channel < ApplicationModel
   after_update   :email_address_check
   after_destroy  :email_address_check
 
+  after_initialize :refresh_xoaut2!
+
   # rubocop:disable Style/ClassVars
   @@channel_stream = {}
   @@channel_stream_started_till_at = {}
@@ -40,7 +42,6 @@ fetch one account
 =end
 
   def fetch(force = false)
-
     adapter         = options[:adapter]
     adapter_options = options
     if options[:inbound] && options[:inbound][:adapter]
@@ -58,7 +59,7 @@ fetch one account
       self.last_log_in = result[:notice]
       preferences[:last_fetch] = Time.zone.now
       save!
-      return true
+      true
     rescue => e
       error = "Can't use Channel::Driver::#{adapter.to_classname}: #{e.inspect}"
       logger.error error
@@ -67,7 +68,7 @@ fetch one account
       self.last_log_in = error
       preferences[:last_fetch] = Time.zone.now
       save!
-      return false
+      false
     end
   end
 
@@ -98,7 +99,7 @@ stream instance of account
 
       # set scheduler job to active
 
-      return driver_instance
+      driver_instance
     rescue => e
       error = "Can't use Channel::Driver::#{adapter.to_classname}: #{e.inspect}"
       logger.error error
@@ -334,6 +335,21 @@ get instance of channel driver
 
   def driver_instance
     self.class.driver_class(options[:adapter])
+  end
+
+  def refresh_xoaut2!
+    return if options.dig(:auth, :type) != 'XOAUTH2'
+
+    result = ExternalCredential.refresh_token(options[:auth][:provider], options[:auth])
+
+    options[:auth]                          = result
+    options[:inbound][:options][:password]  = result[:access_token]
+    options[:outbound][:options][:password] = result[:access_token]
+
+    save!
+  rescue StandardError => e
+    logger.error e
+    raise "Failed to refresh XOAUTH2 access_token of provider '#{options[:auth][:provider]}'! #{e.inspect}"
   end
 
   private

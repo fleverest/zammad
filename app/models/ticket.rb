@@ -13,7 +13,6 @@ class Ticket < ApplicationModel
   include HasOnlineNotifications
   include HasKarmaActivityLog
   include HasLinks
-  include Ticket::ChecksAccess
   include HasObjectManagerAttributesValidation
 
   include Ticket::Escalation
@@ -424,7 +423,21 @@ returns
 
 get count of tickets and tickets which match on selector
 
+@param  [Hash] selectors hash with conditions
+@oparam [Hash] options
+
+@option options [String]  :access can be 'full', 'read', 'create' or 'ignore' (ignore means a selector over all tickets), defaults to 'full'
+@option options [Integer] :limit of tickets to return
+@option options [User]    :user is a current user
+@option options [Integer] :execution_time is a current user
+
+@return [Integer, [<Ticket>]]
+
+@example
   ticket_count, tickets = Ticket.selectors(params[:condition], limit: limit, current_user: current_user, access: 'full')
+
+  ticket_count # count of found tickets
+  tickets      # tickets
 
 =end
 
@@ -434,12 +447,12 @@ get count of tickets and tickets which match on selector
     access = options[:access] || 'full'
     raise 'no selectors given' if !selectors
 
-    query, bind_params, tables = selector2sql(selectors, current_user: current_user)
+    query, bind_params, tables = selector2sql(selectors, current_user: current_user, execution_time: options[:execution_time])
     return [] if !query
 
     ActiveRecord::Base.transaction(requires_new: true) do
 
-      if !current_user
+      if !current_user || access == 'ignore'
         ticket_count = Ticket.distinct.where(query, *bind_params).joins(tables).count
         tickets = Ticket.distinct.where(query, *bind_params).joins(tables).limit(limit)
         return [ticket_count, tickets]
@@ -528,6 +541,7 @@ condition example
       selector = attribute.split(/\./)
       next if !selector[1]
       next if selector[0] == 'ticket'
+      next if selector[0] == 'execution_time'
       next if tables.include?(selector[0])
 
       if query != ''
@@ -554,6 +568,7 @@ condition example
     end
 
     # add conditions
+    no_result = false
     selectors.each do |attribute, selector_raw|
 
       # validation
@@ -562,12 +577,12 @@ condition example
 
       selector = selector_raw.stringify_keys
       raise "Invalid selector, operator missing #{selector.inspect}" if !selector['operator']
-      raise "Invalid selector, operator #{selector['operator']} is invalid #{selector.inspect}" if !selector['operator'].match?(/^(is|is\snot|contains|contains\s(not|all|one|all\snot|one\snot)|(after|before)\s\(absolute\)|(within\snext|within\slast|after|before)\s\(relative\))$/)
+      raise "Invalid selector, operator #{selector['operator']} is invalid #{selector.inspect}" if !selector['operator'].match?(/^(is|is\snot|contains|contains\s(not|all|one|all\snot|one\snot)|(after|before)\s\(absolute\)|(within\snext|within\slast|after|before)\s\(relative\))|(is\sin\sworking\stime|is\snot\sin\sworking\stime)$/)
 
       # validate value / allow blank but only if pre_condition exists and is not specific
       if !selector.key?('value') ||
          (selector['value'].class == Array && selector['value'].respond_to?(:blank?) && selector['value'].blank?) ||
-         (selector['operator'] =~ /^contains/ && selector['value'].respond_to?(:blank?) && selector['value'].blank?)
+         (selector['operator'].start_with?('contains') && selector['value'].respond_to?(:blank?) && selector['value'].blank?)
         return nil if selector['pre_condition'].nil?
         return nil if selector['pre_condition'].respond_to?(:blank?) && selector['pre_condition'].blank?
         return nil if selector['pre_condition'] == 'specific'
@@ -587,6 +602,22 @@ condition example
 
       if attributes[0] == 'ticket' && attributes[1] == 'tags'
         selector['value'] = selector['value'].split(/,/).collect(&:strip)
+      end
+
+      if selector['operator'].include?('in working time')
+        next if attributes[1] != 'calendar_id'
+        raise 'Please enable execution_time feature to use it (currently only allowed for triggers and schedulers)' if !options[:execution_time]
+
+        biz = Calendar.lookup(id: selector['value'])&.biz
+        next if biz.blank?
+
+        if ( selector['operator'] == 'is in working time' && !biz.in_hours?(Time.zone.now) ) || ( selector['operator'] == 'is not in working time' && biz.in_hours?(Time.zone.now) )
+          no_result = true
+          break
+        end
+
+        # skip to next condition
+        next
       end
 
       if query != ''
@@ -705,20 +736,14 @@ condition example
         bind_params.push selector['value'].count
         bind_params.push selector['value']
       elsif selector['operator'] == 'contains one' && attributes[0] == 'ticket' && attributes[1] == 'tags'
-        query += "1 <= (
-                          SELECT
-                            COUNT(*)
-                          FROM
-                            tag_objects,
-                            tag_items,
-                            tags
-                          WHERE
-                            tickets.id = tags.o_id AND
-                            tag_objects.id = tags.tag_object_id AND
-                            tag_objects.name = 'Ticket' AND
-                            tag_items.id = tags.tag_item_id AND
-                            tag_items.name IN (?)
-                        )"
+        tables += ', tag_objects, tag_items, tags'
+        query += "
+          tickets.id = tags.o_id AND
+          tag_objects.id = tags.tag_object_id AND
+          tag_objects.name = 'Ticket' AND
+          tag_items.id = tags.tag_item_id AND
+          tag_items.name IN (?)"
+
         bind_params.push selector['value']
       elsif selector['operator'] == 'contains all not' && attributes[0] == 'ticket' && attributes[1] == 'tags'
         query += "0 = (
@@ -831,6 +856,8 @@ condition example
       end
     end
 
+    return if no_result
+
     [query, bind_params, tables]
   end
 
@@ -938,9 +965,9 @@ perform changes on ticket
 
       # lookup pre_condition
       if value['pre_condition']
-        if value['pre_condition'].match?(/^not_set/)
+        if value['pre_condition'].start_with?('not_set')
           value['value'] = 1
-        elsif value['pre_condition'].match?(/^current_user\./)
+        elsif value['pre_condition'].start_with?('current_user.')
           raise 'Unable to use current_user, got no current_user_id for ticket.perform_changes' if !current_user_id
 
           value['value'] = current_user_id
@@ -1132,17 +1159,21 @@ perform active triggers on ticket
           }
         end
 
-        # verify is condition is matching
-        ticket_count, tickets = Ticket.selectors(condition, limit: 1)
-
-        next if ticket_count.blank?
-        next if ticket_count.zero?
-        next if tickets.first.id != ticket.id
-
         user_id = ticket.updated_by_id
         if article
           user_id = article.updated_by_id
         end
+
+        user = if user_id != 1
+                 User.lookup(id: user_id)
+               end
+
+        # verify is condition is matching
+        ticket_count, tickets = Ticket.selectors(condition, limit: 1, execution_time: true, current_user: user, access: 'ignore')
+
+        next if ticket_count.blank?
+        next if ticket_count.zero?
+        next if tickets.first.id != ticket.id
 
         if recursive == false && local_options[:loop_count] > 1
           message = "Do not execute recursive triggers per default until Zammad 3.0. With Zammad 3.0 and higher the following trigger is executed '#{trigger.name}' on Ticket:#{ticket.id}. Please review your current triggers and change them if needed."
@@ -1353,6 +1384,13 @@ result
         User.group_access(group_id, 'full').sort_by(&:login).each do |user|
           recipients_raw.push(user.email)
         end
+      elsif recipient =~ /\Auserid_(\d+)\z/
+        user = User.lookup(id: $1)
+        if !user
+          logger.warn "Can't find configured Trigger Email recipient User with ID '#{$1}'"
+          next
+        end
+        recipients_raw.push(user.email)
       else
         logger.error "Unknown email notification recipient '#{recipient}'"
         next
@@ -1400,13 +1438,16 @@ result
       email_address_validation = EmailAddressValidation.new(recipient_email)
       next if !email_address_validation.valid_format?
 
+      # do not send notification if system address
+      next if EmailAddress.exists?(email: recipient_email.downcase)
+
       # do not sent notifications to this recipients
       send_no_auto_response_reg_exp = Setting.get('send_no_auto_response_reg_exp')
       begin
         next if recipient_email.match?(/#{send_no_auto_response_reg_exp}/i)
       rescue => e
-        logger.error "ERROR: Invalid regex '#{send_no_auto_response_reg_exp}' in setting send_no_auto_response_reg_exp"
-        logger.error 'ERROR: ' + e.inspect
+        logger.error "Invalid regex '#{send_no_auto_response_reg_exp}' in setting send_no_auto_response_reg_exp"
+        logger.error e
         next if recipient_email.match?(/(mailer-daemon|postmaster|abuse|root|noreply|noreply.+?|no-reply|no-reply.+?)@.+?/i)
       end
 
@@ -1484,12 +1525,62 @@ result
       return
     end
 
+    security = nil
+    if Setting.get('smime_integration')
+      sign       = value['sign'].present? && value['sign'] != 'no'
+      encryption = value['encryption'].present? && value['encryption'] != 'no'
+      security   = {
+        type:       'S/MIME',
+        sign:       {
+          success: false,
+        },
+        encryption: {
+          success: false,
+        },
+      }
+
+      if sign
+        sign_found = false
+        begin
+          list = Mail::AddressList.new(email_address.email)
+          from = list.addresses.first.to_s
+          cert = SMIMECertificate.for_sender_email_address(from)
+          if cert && !cert.expired?
+            sign_found                = true
+            security[:sign][:success] = true
+            security[:sign][:comment] = "certificate for #{email_address.email} found"
+          end
+        rescue # rubocop:disable Lint/SuppressedException
+        end
+
+        if value['sign'] == 'discard' && !sign_found
+          logger.info "Unable to send trigger based notification to #{recipient_string} because of missing group #{group.name} email #{email_address.email} certificate for signing (discarding notification)."
+          return
+        end
+      end
+
+      if encryption
+        certs_found = false
+        begin
+          SMIMECertificate.for_recipipent_email_addresses!(recipients_checked)
+          certs_found                     = true
+          security[:encryption][:success] = true
+          security[:encryption][:comment] = "certificates found for #{recipient_string}"
+        rescue # rubocop:disable Lint/SuppressedException
+        end
+
+        if value['encryption'] == 'discard' && !certs_found
+          logger.info "Unable to send trigger based notification to #{recipient_string} because public certificate is not available for encryption (discarding notification)."
+          return
+        end
+      end
+    end
+
     objects = build_notification_template_objects(article)
 
     # get subject
     subject = NotificationFactory::Mailer.template(
       templateInline: value['subject'],
-      locale:         'en-en',
       objects:        objects,
       quote:          false,
     )
@@ -1497,12 +1588,17 @@ result
 
     body = NotificationFactory::Mailer.template(
       templateInline: value['body'],
-      locale:         'en-en',
       objects:        objects,
       quote:          true,
     )
 
     (body, attachments_inline) = HtmlSanitizer.replace_inline_images(body, id)
+
+    preferences                  = {}
+    preferences[:perform_origin] = perform_origin
+    if security.present?
+      preferences[:security] = security
+    end
 
     message = Ticket::Article.create(
       ticket_id:     id,
@@ -1510,12 +1606,10 @@ result
       subject:       subject,
       content_type:  'text/html',
       body:          body,
-      internal:      false,
+      internal:      value['internal'] || false, # default to public if value was not set
       sender:        Ticket::Article::Sender.find_by(name: 'System'),
       type:          Ticket::Article::Type.find_by(name: 'email'),
-      preferences:   {
-        perform_origin: perform_origin,
-      },
+      preferences:   preferences,
       updated_by_id: 1,
       created_by_id: 1,
     )
@@ -1553,6 +1647,11 @@ result
       owner_id
     when 'ticket_agents'
       User.group_access(group_id, 'full').sort_by(&:login)
+    when /\Auserid_(\d+)\z/
+      return $1 if User.exists?($1)
+
+      logger.warn "Can't find configured Trigger SMS recipient User with ID '#{$1}'"
+      nil
     else
       logger.error "Unknown sms notification recipient '#{recipient}'"
       nil
@@ -1563,6 +1662,7 @@ result
     Array(value['recipient'])
       .each_with_object([]) { |recipient_type, sum| sum.concat(Array(sms_recipients_by_type(recipient_type, article))) }
       .map { |user_or_id| User.lookup(id: user_or_id) }
+      .uniq(&:id)
       .select { |user| user.mobile.present? }
   end
 
@@ -1588,8 +1688,6 @@ result
     objects = build_notification_template_objects(article)
     body = NotificationFactory::Renderer.new(
       objects:  objects,
-      locale:   'en-en',
-      timezone: Setting.get('timezone_default'),
       template: value['body'],
       escape:   false
     ).render.html2text.tr(' ', ' ') # convert non-breaking space to simple space
@@ -1600,7 +1698,7 @@ result
       subject:       'SMS notification',
       to:            sms_recipients_to,
       body:          body,
-      internal:      true,
+      internal:      value['internal'] || false, # default to public if value was not set
       sender:        Ticket::Article::Sender.find_by(name: 'System'),
       type:          Ticket::Article::Type.find_by(name: 'sms'),
       preferences:   {

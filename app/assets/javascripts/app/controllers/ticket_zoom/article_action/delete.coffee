@@ -1,18 +1,8 @@
 class Delete
   @action: (actions, ticket, article, ui) ->
-    return actions if ui.permissionCheck('ticket.customer')
+    status = @isDeletable(actions, ticket, article, ui)
 
-    return actions if article.type.name isnt 'note'
-
-    return actions if App.User.current()?.id != article.created_by_id
-
-    return actions if !ui.permissionCheck('ticket.agent')
-
-    # return if article is older then 10 minutes
-    created_at = Date.parse(article.created_at)
-    time_to_show = 600000 - (Date.parse(new Date()) - created_at)
-
-    return actions if time_to_show <= 0
+    return actions if !status.isDeletable
 
     actions.push {
       name: 'delete'
@@ -21,10 +11,42 @@ class Delete
       href: '#'
     }
 
-    # rerender ations in 10 minutes again to hide delete action of article
-    ui.delay(ui.render, time_to_show, 'actions-rerender')
+    # rerender actions if ability to delete expires
+    if status.timeout
+      ui.delay(ui.render, status.timeout, 'actions-rerender')
 
     actions
+
+  @isDeletable: (actions, ticket, article, ui) ->
+    return { isDeletable: true }  if ui.permissionCheck('admin')
+    return { isDeletable: false } if !@deletableForAgent(actions, ticket, article, ui)
+    return { isDeletable: true }  if !@hasDeletableTimeframe()
+
+    timeout = @deletableTimeout(actions, ticket, article, ui)
+
+    return { isDeletable: false } if timeout <= 0
+
+    { isDeletable: true, timeout: timeout }
+
+  @deletableTimeframeSetting: ->
+    App.Config.get('ui_ticket_zoom_article_delete_timeframe')
+
+  @hasDeletableTimeframe: ->
+    @deletableTimeframeSetting() && @deletableTimeframeSetting() > 0
+
+  @deletableTimeout: (actions, ticket, article, ui) ->
+    timeframe_miliseconds = @deletableTimeframeSetting() * 1000
+    now                   = Date.parse(new Date())
+    created_at            = Date.parse(article.created_at)
+
+    timeframe_miliseconds - (now - created_at)
+
+  @deletableForAgent: (actions, ticket, article, ui) ->
+    return false if !ui.permissionCheck('ticket.agent')
+    return false if article.created_by_id != App.User.current()?.id
+    return false if article.type.communication and !article.internal
+
+    true
 
   @perform: (articleContainer, type, ticket, article, ui) ->
     return true if type isnt 'delete'

@@ -4,7 +4,7 @@ require 'ostruct'
 RSpec.describe NotificationFactory::Mailer do
   describe '#template' do
     context 'for postmaster oversized mail' do
-      let(:raw_incoming_mail) { File.read(Rails.root.join('test', 'data', 'mail', 'mail010.box')) }
+      let(:raw_incoming_mail) { File.read(Rails.root.join('test/data/mail/mail010.box')) }
 
       let(:parsed_incoming_mail)  { Channel::EmailParser.new.parse raw_incoming_mail }
 
@@ -12,7 +12,7 @@ RSpec.describe NotificationFactory::Mailer do
         mail = OpenStruct.new
         mail.from_display_name = parsed_incoming_mail[:from_display_name]
         mail.subject = parsed_incoming_mail[:subject]
-        mail.msg_size = format('%.2f', raw_incoming_mail.size.to_f / 1024 / 1024)
+        mail.msg_size = format('%<MB>.2f', MB: raw_incoming_mail.size.to_f / 1024 / 1024)
         mail
       end
 
@@ -90,4 +90,31 @@ RSpec.describe NotificationFactory::Mailer do
       end
     end
   end
+
+  describe '#send' do
+    subject(:result) do
+      described_class.send(
+        recipient: user,
+        subject:   'some subject',
+        body:      'some body',
+      )
+    end
+
+    context 'recipient with email address' do
+      let(:user) { create(:agent_user, email: 'somebody@example.com') }
+
+      it 'returns a Mail::Message' do
+        expect( result ).to be_kind_of(Mail::Message)
+      end
+    end
+
+    context 'recipient without email address' do
+      let(:user) { create(:agent_user, email: '') }
+
+      it 'raises Exceptions::UnprocessableEntity' do
+        expect { result }.to raise_error(Exceptions::UnprocessableEntity)
+      end
+    end
+  end
+
 end

@@ -60,7 +60,7 @@ class String
 =end
 
   def to_filename
-    camel_cased_word = "#{self}" # rubocop:disable Style/UnneededInterpolation
+    camel_cased_word = dup
     camel_cased_word.gsub(/::/, '/')
                     .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
                     .gsub(/([a-z\d])([A-Z])/, '\1_\2')
@@ -77,8 +77,8 @@ class String
 =end
 
   def to_classname
-    camel_cased_word = "#{self}" # rubocop:disable Style/UnneededInterpolation
-    camel_cased_word.gsub!(/\.rb$/, '')
+    camel_cased_word = dup
+    camel_cased_word.delete_suffix!('.rb')
     camel_cased_word.split('/').map(&:camelize).join('::')
   end
 
@@ -109,7 +109,7 @@ class String
 =end
 
   def html2text(string_only = false, strict = false)
-    string = "#{self}" # rubocop:disable Style/UnneededInterpolation
+    string = dup
 
     # in case of invalid encoding, strip invalid chars
     # see also test/data/mail/mail021.box
@@ -137,7 +137,7 @@ class String
       string.gsub!(%r{<a[[:space:]]+(|\S+[[:space:]]+)href=("|')(.+?)("|')([[:space:]]*|[[:space:]]+[^>]*)>(.+?)<[[:space:]]*/a[[:space:]]*>}mxi) do |_placeholder|
         link = $3
         text = $6
-        text.gsub!(/\<.+?\>/, '')
+        text.gsub!(/<.+?>/, '')
 
         link_compare = link.dup
         if link_compare.present?
@@ -218,7 +218,7 @@ class String
     string.gsub!(%r{</td>}i, ' ')
 
     # strip all other tags
-    string.gsub!(/\<.+?\>/, '')
+    string.gsub!(/<.+?>/, '')
 
     # replace multiple spaces with one
     string.gsub!(/  /, ' ')
@@ -322,7 +322,7 @@ class String
 =end
 
   def html2html_strict
-    string = "#{self}" # rubocop:disable Style/UnneededInterpolation
+    string = dup
     string = HtmlSanitizer.cleanup_replace_tags(string)
     string = HtmlSanitizer.strict(string, true).strip
     string = HtmlSanitizer.cleanup(string).strip
@@ -348,8 +348,8 @@ class String
     string.gsub!(/(<br>[[:space:]]*){3,}/im, '<br><br>')
     string.gsub!(%r\(<br(|/)>[[:space:]]*){3,}\im, '<br/><br/>')
     string.gsub!(%r{<p>[[:space:]]+</p>}im, '<p>&nbsp;</p>')
-    string.gsub!(%r{\A(<br(|\/)>[[:space:]]*)*}i, '')
-    string.gsub!(%r{[[:space:]]*(<br(|\/)>[[:space:]]*)*\Z}i, '')
+    string.gsub!(%r{\A(<br(|/)>[[:space:]]*)*}i, '')
+    string.gsub!(%r{[[:space:]]*(<br(|/)>[[:space:]]*)*\Z}i, '')
     string.gsub!(%r{(<p></p>){1,10}\Z}i, '')
 
     string.signature_identify('html')

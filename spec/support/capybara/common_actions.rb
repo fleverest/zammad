@@ -36,10 +36,6 @@ module CommonActions
     wait(4).until_exists do
       current_login
     end
-
-    return if User.find_by(login: current_login).preferences[:intro]
-
-    find(:clues_close, wait: 3).in_fixed_postion.click
   end
 
   # Checks if the current session is logged in.
@@ -183,32 +179,60 @@ module CommonActions
     click '.js-openDropdownMacro'
   end
 
+  def open_article_meta
+    wrapper = all(%(div.ticket-article-item)).last
+
+    wrapper.find('.article-content .textBubble').click
+    wait(3).until do
+      wrapper.find('.article-content-meta .article-meta.top').in_fixed_postion
+    end
+  end
+
+  def use_template(template)
+    wait(4).until do
+      field  = find('#form-template select[name="id"]')
+      option = field.find(:option, template.name)
+      option.select_option
+      click '.sidebar-content .js-apply'
+
+      # this is a workaround for a race condition where
+      # the template selection get's re-rendered after
+      # a selection was made. The selection is lost and
+      # the apply click has no effect.
+      template.options.any? do |attribute, value|
+        selector = %([name="#{attribute}"])
+        next if !page.has_css?(selector, wait: 0)
+
+        find(selector, wait: 0, visible: false).value == value
+      end
+    end
+  end
+
   # Checks if modal is ready
   #
   # @param timeout [Integer] seconds to wait
   def modal_ready(timeout: 4)
-    wait(timeout).until_exists { find('.modal.in') }
+    wait(timeout).until_exists { find('.modal.in', wait: 0) }
   end
 
   # Checks if modal has disappeared
   #
   # @param timeout [Integer] seconds to wait
   def modal_disappear(timeout: 4)
-    wait(timeout).until_disappears { find('.modal.in') }
+    wait(timeout).until_disappears { find('.modal', wait: 0) }
   end
 
-  # Scrolls to given element
+  # Executes action inside of modal. Makes sure modal has opened and closes
   #
-  # @option options [String] :css selector
-  # @option options [String] :vertical may be "start", "center", "end", or "nearest". Defaults to "start".
-  def scroll_to(params)
-    vertical = params.fetch :vertical, 'start'
+  # @param timeout [Integer] seconds to wait
+  def in_modal(timeout: 4)
+    modal_ready(timeout: timeout)
 
-    script = "$('#{params[:css]}').get(0).scrollIntoView({block: '#{vertical}'})"
+    within '.modal' do
+      yield
+    end
 
-    execute_script script
-
-    wait(1).until_constant { evaluate_script "$('#{params[:css]}').get(0).scrollTop"  }
+    modal_disappear(timeout: timeout)
   end
 end
 

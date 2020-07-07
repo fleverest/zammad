@@ -78,6 +78,8 @@ class Channel::EmailParser
     msg = Mail::Utilities.binary_unsafe_to_crlf(msg)
     mail = Mail.new(msg)
 
+    force_parts_encoding_if_needed(mail)
+
     headers = message_header_hash(mail)
     body = message_body_hash(mail)
     message_attributes = [
@@ -85,6 +87,7 @@ class Channel::EmailParser
       headers,
       body,
       self.class.sender_attributes(headers),
+      raw: msg,
     ]
     message_attributes.reduce({}.with_indifferent_access, &:merge)
   end
@@ -118,9 +121,9 @@ returns
     # store unprocessable email for bug reporting
     filename = archive_mail('unprocessable_mail', msg)
 
-    message = "ERROR: Can't process email, you will find it for bug reporting under #{filename}, please create an issue at https://github.com/zammad/zammad/issues"
+    message = "Can't process email, you will find it for bug reporting under #{filename}, please create an issue at https://github.com/zammad/zammad/issues"
 
-    p message # rubocop:disable Rails/Output
+    p 'ERROR: ' + message # rubocop:disable Rails/Output
     p 'ERROR: ' + e.inspect # rubocop:disable Rails/Output
     Rails.logger.error message
     Rails.logger.error e
@@ -473,7 +476,7 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
 =end
 
   def self.process_unprocessable_mails(params = {})
-    path = Rails.root.join('tmp', 'unprocessable_mail')
+    path = Rails.root.join('tmp/unprocessable_mail')
     files = []
     Dir.glob("#{path}/*.eml") do |entry|
       ticket, _article, _user, _mail = Channel::EmailParser.new.process(params, IO.binread(entry))
@@ -500,6 +503,18 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
 
   private
 
+  # https://github.com/zammad/zammad/issues/2922
+  def force_parts_encoding_if_needed(mail)
+    mail.parts.each { |elem| force_single_part_encoding_if_needed(elem) }
+  end
+
+  # https://github.com/zammad/zammad/issues/2922
+  def force_single_part_encoding_if_needed(part)
+    return if part.charset != 'iso-2022-jp'
+
+    part.body = part.body.encoded.unpack1('M').tr('_', ' ').force_encoding('ISO-2022-JP').encode('UTF-8')
+  end
+
   def message_header_hash(mail)
     imported_fields = mail.header.fields.map do |f|
       begin
@@ -517,7 +532,7 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
     end.to_h
 
     # imported_fields = mail.header.fields.map { |f| [f.name.downcase, f.to_utf8] }.to_h
-    raw_fields = mail.header.fields.map { |f| ["raw-#{f.name.downcase}", f] }.to_h
+    raw_fields = mail.header.fields.index_by { |f| "raw-#{f.name.downcase}" }
     custom_fields = {}.tap do |h|
       h.replace(imported_fields.slice(*RECIPIENT_FIELDS)
                                .transform_values { |v| v.match?(EMAIL_REGEX) ? v : '' })
@@ -574,38 +589,48 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
   def collect_attachments(mail)
     attachments = []
 
-    # Add non-plaintext body as an attachment
-    if mail.html_part&.body.present? ||
-       (!mail.multipart? && mail.mime_type.present? && mail.mime_type != 'text/plain')
-      message = mail.html_part || mail
-
-      filename = message.filename.presence ||
-                 (message.mime_type.eql?('text/html') ? 'message.html' : '-no name-')
-
-      headers_store = {
-        'content-alternative' => true,
-        'original-format'     => message.mime_type.eql?('text/html'),
-        'Mime-Type'           => message.mime_type,
-        'Charset'             => message.charset,
-      }.reject { |_, v| v.blank? }
-
-      attachments.push({ data:        body_text(message),
-                         filename:    filename,
-                         preferences: headers_store })
-    end
+    attachments.push(*get_nonplaintext_body_as_attachment(mail))
 
     mail.parts.each do |part|
-
-      new_attachments = get_attachments(part, attachments, mail).flatten.compact
-      attachments.push(*new_attachments)
-    rescue => e # Protect process to work with spam emails (see test/fixtures/mail15.box)
-      raise e if (fail_count ||= 0).positive?
-
-      (fail_count += 1) && retry
-
+      attachments.push(*gracefully_get_attachments(part, attachments, mail))
     end
 
     attachments
+  end
+
+  def get_nonplaintext_body_as_attachment(mail)
+    if !(mail.html_part&.body.present? || (!mail.multipart? && mail.mime_type.present? && mail.mime_type != 'text/plain'))
+      return
+    end
+
+    message = mail.html_part || mail
+
+    if !mail.mime_type.starts_with?('text/') && mail.html_part.blank?
+      return gracefully_get_attachments(message, [], mail)
+    end
+
+    filename = message.filename.presence || (message.mime_type.eql?('text/html') ? 'message.html' : '-no name-')
+
+    headers_store = {
+      'content-alternative' => true,
+      'original-format'     => message.mime_type.eql?('text/html'),
+      'Mime-Type'           => message.mime_type,
+      'Charset'             => message.charset,
+    }.reject { |_, v| v.blank? }
+
+    [{
+      data:        body_text(message),
+      filename:    filename,
+      preferences: headers_store
+    }]
+  end
+
+  def gracefully_get_attachments(part, attachments, mail)
+    get_attachments(part, attachments, mail).flatten.compact
+  rescue => e # Protect process to work with spam emails (see test/fixtures/mail15.box)
+    raise e if (fail_count ||= 0).positive?
+
+    (fail_count += 1) && retry
   end
 
   def get_attachments(file, attachments, mail)
@@ -628,8 +653,8 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
 
     # cleanup content id, <> will be added automatically later
     if headers_store['Content-ID']
-      headers_store['Content-ID'].gsub!(/^</, '')
-      headers_store['Content-ID'].gsub!(/>$/, '')
+      headers_store['Content-ID'].delete_prefix!('<')
+      headers_store['Content-ID'].delete_suffix!('>')
     end
 
     # get filename from content-disposition
@@ -722,7 +747,7 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
     end
 
     # e. g. Content-Type: video/quicktime
-    if filename.blank?
+    if filename.blank? && (content_type = headers_store['Content-Type'])
       map = {
         'message/delivery-status': %w[txt delivery-status],
         'text/plain':              %w[txt document],
@@ -734,7 +759,7 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
         'image/gif':               %w[gif image],
       }
       map.each do |type, ext|
-        next if !headers_store['Content-Type'].match?(/^#{Regexp.quote(type)}/i)
+        next if !content_type.match?(/^#{Regexp.quote(type)}/i)
 
         filename = if headers_store['Content-Description'].present?
                      "#{headers_store['Content-Description']}.#{ext[0]}".to_s.force_encoding('utf-8')
@@ -837,7 +862,7 @@ process unprocessable_mails (tmp/unprocessable_mail/*.eml) again
     mail = OpenStruct.new
     mail.from_display_name = parsed_incoming_mail[:from_display_name]
     mail.subject = parsed_incoming_mail[:subject]
-    mail.msg_size = format('%.2f', raw_incoming_mail.size.to_f / 1024 / 1024)
+    mail.msg_size = format('%<MB>.2f', MB: raw_incoming_mail.size.to_f / 1024 / 1024)
 
     reply = NotificationFactory::Mailer.template(
       template:   'email_oversized',

@@ -1,6 +1,6 @@
 module NotificationFactory
-  TEMPLATE_PATH_STRING = Rails.root.join('app', 'views', '%<type>s', '%<template>s', '%<filename>s').to_s.freeze
-  APPLICATION_TEMPLATE_PATH_STRING = Rails.root.join('app', 'views', '%<type>s', 'application.%<format>s.erb').to_s.freeze
+  TEMPLATE_PATH_STRING = Rails.root.join('app/views/%<type>s/%<template>s/%<filename>s').to_s.freeze
+  APPLICATION_TEMPLATE_PATH_STRING = Rails.root.join('app/views/%<type>s/application.%<format>s.erb').to_s.freeze
 
 =begin
 
@@ -53,7 +53,7 @@ returns
   private_class_method :template_path
 
   def self.template_filenames(data)
-    locale = data[:locale] || Setting.get('locale_default') || 'en-us'
+    locale = data[:locale] || Locale.default
 
     [locale, locale[0, 2], 'en']
       .uniq

@@ -1,4 +1,4 @@
-module EmailHelper
+class EmailHelper
   class Probe
 
 =begin
@@ -56,7 +56,7 @@ returns on fail
         return {
           result:   'invalid',
           messages: {
-            email: 'Invalid email.'
+            email: "Invalid email '#{params[:email]}'."
           },
         }
       end
@@ -172,7 +172,7 @@ get result of inbound probe
 
   result = EmailHelper::Probe.inbound(
     adapter: 'imap',
-    settings: {
+    options: {
       host: 'imap.gmail.com',
       port: 993,
       ssl: true,
@@ -400,6 +400,7 @@ returns on fail
         'Incorrect username'                                        => 'Authentication failed, username incorrect!',
         'Lookup failed'                                             => 'Authentication failed, username incorrect!',
         'Invalid credentials'                                       => 'Authentication failed, invalid credentials!',
+        'authentication not enabled'                                => 'Authentication not possible (not offered by the service)',
         'getaddrinfo: nodename nor servname provided, or not known' => 'Hostname not found!',
         'getaddrinfo: Name or service not known'                    => 'Hostname not found!',
         'No route to host'                                          => 'No route to host!',

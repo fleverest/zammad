@@ -1,8 +1,8 @@
 source 'https://rubygems.org'
 
 # core - base
-ruby '2.5.5'
-gem 'rails', '5.2.4.1'
+ruby '2.6.5'
+gem 'rails', '5.2.4.3'
 
 # core - rails additions
 gem 'activerecord-import'
@@ -34,6 +34,12 @@ gem 'argon2'
 
 # core - state machine
 gem 'aasm'
+
+# core - authorization
+gem 'pundit'
+
+# core - image processing
+gem 'rszr', '0.5.2'
 
 # performance - Memcached
 gem 'dalli'
@@ -79,6 +85,7 @@ gem 'omniauth-twitter'
 gem 'omniauth-weibo-oauth2'
 
 # channels
+gem 'gmail_xoauth'
 gem 'koala'
 gem 'telegramAPI'
 gem 'twitter', git: 'https://github.com/sferik/twitter.git'
@@ -126,8 +133,8 @@ gem 'autodiscover', git: 'https://github.com/zammad-deps/autodiscover'
 gem 'rubyntlm', git: 'https://github.com/wimm/rubyntlm'
 gem 'viewpoint'
 
-# image processing
-gem 'rszr', '0.5.2'
+# integrations - S/MIME
+gem 'openssl'
 
 # Gems used only for develop/test and not required
 # in production environments by default.
@@ -150,6 +157,9 @@ group :development, :test do
   gem 'rspec-rails'
   gem 'shoulda-matchers'
   gem 'test-unit'
+
+  # for testing Pundit authorisation policies in RSpec
+  gem 'pundit-matchers'
 
   # code coverage
   gem 'coveralls', require: false

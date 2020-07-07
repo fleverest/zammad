@@ -72,7 +72,7 @@ Setting.create_if_not_exists(
   area:        'Core::Develop',
   description: 'Defines if application is in developer mode (useful for developer, all users have the same password, password reset will work without email delivery).',
   options:     {},
-  state:       false,
+  state:       Rails.env.development?,
   preferences: { online_service_disable: true },
   frontend:    true
 )
@@ -275,6 +275,14 @@ Setting.create_if_not_exists(
     placeholder:            true,
     permission:             ['admin.system'],
   },
+  frontend:    true
+)
+Setting.create_if_not_exists(
+  title:       'Websocket backend',
+  name:        'websocket_backend',
+  area:        'System::WebSocket',
+  description: 'Defines how to reach websocket server. "websocket" is default on production, "websocketPort" is for CI',
+  state:       Rails.env.production? ? 'websocket' : 'websocketPort',
   frontend:    true
 )
 Setting.create_if_not_exists(
@@ -3343,6 +3351,15 @@ Setting.create_if_not_exists(
 )
 Setting.create_if_not_exists(
   title:       'Defines postmaster filter.',
+  name:        '0016_postmaster_filter_smime',
+  area:        'Postmaster::PreFilter',
+  description: 'Defines postmaster filter to handle secure mailing.',
+  options:     {},
+  state:       'Channel::Filter::SecureMailing',
+  frontend:    false
+)
+Setting.create_if_not_exists(
+  title:       'Defines postmaster filter.',
   name:        '0020_postmaster_filter_auto_response_check',
   area:        'Postmaster::PreFilter',
   description: 'Defines postmaster filter to identify auto responses to prevent auto replies from Zammad.',
@@ -3447,6 +3464,24 @@ Setting.create_if_not_exists(
   description: 'Defines postmaster filter to manage Monit (https://mmonit.com/monit/) emails.',
   options:     {},
   state:       'Channel::Filter::Monit',
+  frontend:    false
+)
+Setting.create_if_not_exists(
+  title:       'Defines postmaster filter.',
+  name:        '5400_postmaster_filter_service_now_check',
+  area:        'Postmaster::PreFilter',
+  description: 'Defines postmaster filter to identify service now mails for correct follow-ups.',
+  options:     {},
+  state:       'Channel::Filter::ServiceNowCheck',
+  frontend:    false
+)
+Setting.create_if_not_exists(
+  title:       'Defines postmaster filter.',
+  name:        '5401_postmaster_filter_service_now_check',
+  area:        'Postmaster::PostFilter',
+  description: 'Defines postmaster filter to identify service now mails for correct follow-ups.',
+  options:     {},
+  state:       'Channel::Filter::ServiceNowCheck',
   frontend:    false
 )
 Setting.create_if_not_exists(
@@ -4509,4 +4544,59 @@ Setting.create_if_not_exists(
     permission:     [],
   },
   frontend:    true
+)
+
+Setting.create_if_not_exists(
+  title:       'Define timeframe where a own created note can get deleted.',
+  name:        'ui_ticket_zoom_article_delete_timeframe',
+  area:        'UI::TicketZoomArticle',
+  description: "Set timeframe in seconds. If it's set to 0 you can delete notes without time limits",
+  options:     {},
+  state:       600,
+  preferences: {
+    permission: ['admin.ui']
+  },
+  frontend:    true
+)
+
+Setting.create_if_not_exists(
+  title:       'S/MIME integration',
+  name:        'smime_integration',
+  area:        'Integration::Switch',
+  description: 'Defines if S/MIME encryption is enabled or not.',
+  options:     {
+    form: [
+      {
+        display: '',
+        null:    true,
+        name:    'smime_integration',
+        tag:     'boolean',
+        options: {
+          true  => 'yes',
+          false => 'no',
+        },
+      },
+    ],
+  },
+  state:       false,
+  preferences: {
+    prio:           1,
+    authentication: true,
+    permission:     ['admin.integration'],
+  },
+  frontend:    true
+)
+
+Setting.create_if_not_exists(
+  title:       'S/MIME config',
+  name:        'smime_config',
+  area:        'Integration::SMIME',
+  description: 'Defines the S/MIME config.',
+  options:     {},
+  state:       {},
+  preferences: {
+    prio:       2,
+    permission: ['admin.integration'],
+  },
+  frontend:    true,
 )

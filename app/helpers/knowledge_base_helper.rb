@@ -5,13 +5,20 @@ module KnowledgeBaseHelper
     knowledge_base.send("#{layout_prefix}_layout")
   end
 
-  def custom_path_if_needed(path, knowledge_base)
-    return path if knowledge_base.custom_address_matches? request
+  def custom_path_if_needed(path, knowledge_base, full: false)
+    return path unless knowledge_base.custom_address_matches? request
 
-    prefix = knowledge_base.custom_address_uri&.path
-    return path if prefix.nil?
+    custom_address = knowledge_base.custom_address_uri
+    return path unless custom_address
 
-    path.gsub(%r{^\/help}, prefix).presence || '/'
+    output = path.gsub(%r{^/help}, custom_address.path || '').presence || '/'
+
+    if full
+      fqdn = request.headers.env['SERVER_NAME']
+      output = "#{custom_address.scheme}://#{custom_address.host || fqdn}#{output}"
+    end
+
+    output
   end
 
   def translation_locale_code(translation)
@@ -53,5 +60,9 @@ module KnowledgeBaseHelper
     URI::Generic
       .build(host: host, scheme: scheme, port: port, fragment: path)
       .to_s
+  end
+
+  def dropdown_menu_direction
+    system_locale_via_uri.dir == 'ltr' ? 'right' : 'left'
   end
 end

@@ -11,6 +11,7 @@ inherit_from:
   - .rubocop_todo.rspec.yml
 
 AllCops:
+  NewCops: enable
   DisplayCopNames: true
   Exclude:
     - 'bin/rails'
@@ -18,7 +19,9 @@ AllCops:
     - 'bin/spring'
     - 'db/schema.rb'
     - 'vendor/**/*'
+    - 'node_modules/**/*'
     - 'public/assets/**/*'
+    - 'public/packs/**/*'
   RSpec:
     Patterns:
       - '_spec.rb$'
@@ -32,7 +35,7 @@ Rails:
 Style/FrozenStringLiteralComment:
   Enabled: false
 
-Metrics/LineLength:
+Layout/LineLength:
   Description: 'Limit lines to 80 characters.'
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#80-character-limits'
   Enabled: false
@@ -106,7 +109,7 @@ Style/MethodDefParentheses:
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#method-parens'
   Enabled: false
 
-Layout/AlignHash:
+Layout/HashAlignment:
   Description: >-
                  Align the elements of a hash literal if they span more than
                  one line.
@@ -155,15 +158,20 @@ Style/PerlBackrefs:
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#no-perl-regexp-last-matchers'
   Enabled: false
 
+Style/HashEachMethods:
+  Enabled: true
+
+Style/HashTransformKeys:
+  Enabled: true
+
+Style/HashTransformValues:
+  Enabled: true
+
 Style/SelfAssignment:
   Description: >-
                  Checks for places where self-assignment shorthand should have
                  been used.
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#self-assignment'
-  Enabled: false
-
-Style/BracesAroundHashParameters:
-  Description: 'Enforce braces style around hash parameters.'
   Enabled: false
 
 Rails/ApplicationRecord:
@@ -210,12 +218,12 @@ Naming/VariableNumber:
   Description: 'Use the configured style when numbering variables.'
   Enabled: false
 
-Naming/UncommunicativeMethodParamName:
+Naming/MethodParameterName:
   Description: >-
                 Checks for method parameter names that contain capital letters,
                 end in numbers, or do not meet a minimal length.
   Enabled: true
-  AllowedNames: e, id, _, ip
+  AllowedNames: e, id, _, ip, to
 
 Lint/BooleanSymbol:
   Description: 'Check for `:true` and `:false` symbols.'

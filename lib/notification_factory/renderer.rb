@@ -26,8 +26,8 @@ examples how to use
 =end
 
   def initialize(objects:, locale: nil, timezone: nil, template:, escape: true)
-    @objects = objects
-    @locale = locale || Setting.get('locale_default') || 'en-us'
+    @objects  = objects
+    @locale   = locale || Locale.default
     @timezone = timezone || Setting.get('timezone_default')
     @template = NotificationFactory::Template.new(template, escape)
     @escape = escape
@@ -105,7 +105,7 @@ examples how to use
       end
 
       arguments = nil
-      if /\A(?<method_id>[^\(]+)\((?<parameter>[^\)]+)\)\z/ =~ method
+      if /\A(?<method_id>[^(]+)\((?<parameter>[^)]+)\)\z/ =~ method
 
         if parameter != parameter.to_i.to_s
           value = "\#{#{object_name}.#{object_methods_s} / invalid parameter: #{parameter}}"

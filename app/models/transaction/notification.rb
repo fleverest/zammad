@@ -159,7 +159,7 @@ class Transaction::Notification
       end
 
       # ignore email channel notification and empty emails
-      if !channels['email'] || !user.email || user.email == ''
+      if !channels['email'] || user.email.blank?
         add_recipient_list(ticket, user, used_channels, @item[:type])
         next
       end
@@ -235,7 +235,7 @@ class Transaction::Notification
 
     return {} if !@item[:changes]
 
-    locale = user.preferences[:locale] || Setting.get('locale_default') || 'en-us'
+    locale = user.locale
 
     # only show allowed attributes
     attribute_list = ObjectManager::Attribute.by_object_as_hash('Ticket', user)

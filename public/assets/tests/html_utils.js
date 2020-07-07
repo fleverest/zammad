@@ -63,6 +63,35 @@ test("text2html", function() {
   result = App.Utils.text2html(source)
   equal(result, should, source)
 
+  source = "Some\nValue\n"
+  should = "<div>Some</div><div>Value</div>"
+  result = App.Utils.text2html(source)
+  equal(result, should, source)
+
+  source = "Some\rValue\r"
+  should = "<div>Some</div><div>Value</div>"
+  result = App.Utils.text2html(source)
+  equal(result, should, source)
+
+  source = "Some\n\rValue\n\r"
+  should = "<div>Some</div><div>Value</div>"
+  result = App.Utils.text2html(source)
+  equal(result, should, source)
+
+  source = "Some\r\nValue\r\n"
+  should = "<div>Some</div><div>Value</div>"
+  result = App.Utils.text2html(source)
+  equal(result, should, source)
+
+  source = "Some   Value 123"
+  should = "<div>Some &nbsp; Value 123</div>"
+  result = App.Utils.text2html(source)
+  equal(result, should, source)
+
+  source = "Some\n   Value\n    123"
+  should = "<div>Some</div><div> &nbsp; Value</div><div> &nbsp; &nbsp;123</div>"
+  result = App.Utils.text2html(source)
+  equal(result, should, source)
 });
 
 // htmlStrip
@@ -3234,20 +3263,34 @@ test('App.Utils.icon()', function() {
   equal(App.Utils.icon('arrow-{end}'), svgTag, 'for rtl locale / name includes "{end}"')
 });
 
-source = '<img src="/assets/images/avatar-bg.png">some test'
-$('#image2text').html(source)
-var htmlImage2DataUrlTest = function() {
-
-  var result = App.Utils.htmlImage2DataUrl(source)
-  test("htmlImage2DataUrl async", function() {
-    var result = App.Utils.htmlImage2DataUrl(source)
-    ok(result.match(/some test/), source)
-    ok(!result.match(/avatar-bg.png/), source)
-    ok(result.match(/^\<img src=\"data:image\/png;base64,/), source)
+var source1 = '<img src="/assets/images/avatar-bg.png">some test'
+$('#image2data1').html(source1)
+var htmlImage2DataUrlTest1 = function() {
+  test("htmlImage2DataUrl1 async", function() {
+    var result1 = App.Utils.htmlImage2DataUrl(source1)
+    ok(result1.match(/some test/), source1)
+    ok(!result1.match(/avatar-bg.png/), source1)
+    ok(result1.match(/^\<img src=\"data:image\/png;base64,/), source1)
   });
-
 }
-$('#image2text img').one('load', htmlImage2DataUrlTest)
+$('#image2data1 img').one('load', htmlImage2DataUrlTest1)
+
+
+var source2 = '<img src="/assets/images/chat-demo-avatar.png">some test'
+$('#image2data2').html(source2)
+var htmlImage2DataUrlTest2Success = function(element) {
+  test('htmlImage2DataUrl2 async', function() {
+    ok(!$(element).html().match(/chat-demo-avatar/), source2)
+    ok($(element).get(0).outerHTML.match(/^\<img src=\"data:image\/png;base64,/), source2)
+    ok($(element).attr('style'), 'max-width: 100%;')
+  });
+}
+var htmlImage2DataUrlTest2Fail = function() {
+  test('htmlImage2DataUrl2 async', function() {
+    ok(false, 'fail callback is exectuted!')
+  });
+}
+App.Utils.htmlImage2DataUrlAsyncInline($('#image2data2'), {success: htmlImage2DataUrlTest2Success, fail: htmlImage2DataUrlTest2Fail})
 
 }
 
@@ -3305,4 +3348,41 @@ test('App.Utils.joinUrlComponents()', function() {
   // When given a list including null or undefined,
   //   expect @joinUrlComponents() to filter them out of the results before joining the rest with slashes
   equal(App.Utils.joinUrlComponents('foo', undefined, 'bar', null, 'baz'), 'foo/bar/baz', 'with a list including null or undefined')
+});
+
+test('App.Utils.clipboardHtmlIsWithText()', function() {
+
+  // no content with text
+  equal(App.Utils.clipboardHtmlIsWithText('<div></div>'), false)
+  equal(App.Utils.clipboardHtmlIsWithText('<div> </div>'), false)
+  equal(App.Utils.clipboardHtmlIsWithText('<div><img src="test.jpg"/></div>'), false)
+  equal(App.Utils.clipboardHtmlIsWithText('<div><!-- some comment --></div>'), false)
+  equal(App.Utils.clipboardHtmlIsWithText('<div><!-- some comment --> </div>'), false)
+  equal(App.Utils.clipboardHtmlIsWithText("<div><!-- some comment --> \n </div>"), false)
+
+  // content with text
+  equal(App.Utils.clipboardHtmlIsWithText('test'), true)
+  equal(App.Utils.clipboardHtmlIsWithText('<div>test</div>'), true)
+  equal(App.Utils.clipboardHtmlIsWithText('<meta http-equiv="content-type" content="text/html; charset=utf-8">sometext'), true)
+});
+
+test('App.Utils.clipboardHtmlInsertPreperation()', function() {
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div></div>', {}), '')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div> </div>', {}), ' ')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div><img src="test.jpg"/></div>', {}), '<img src="test.jpg">')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div><!-- some comment --></div>', {}), '')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div><!-- some comment --> </div>', {}), ' ')
+  equal(App.Utils.clipboardHtmlInsertPreperation("<div><!-- some comment --> \n </div>", {}), " \n ")
+  equal(App.Utils.clipboardHtmlInsertPreperation('test', {}), 'test')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div>test</div>', {}), 'test')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<meta http-equiv="content-type" content="text/html; charset=utf-8">sometext', {}), '<div>sometext</div>')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div><b>test</b> 123</div>', { mode: 'textonly' }), 'test 123')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div><b>test</b><br> 123</div>', { mode: 'textonly' }), 'test 123')
+  equal(App.Utils.clipboardHtmlInsertPreperation('<div><b>test</b><br> 123</div>', { mode: 'textonly', multiline: true }), 'test<br> 123')
+});
+
+test('App.Utils.signatureIdentifyByHtmlHelper()', function() {
+  result = App.Utils.signatureIdentifyByHtmlHelper("&lt;script&gt;alert('fish2');&lt;/script&gt;<blockquote></blockquote>")
+
+  equal(result, "&lt;script&gt;alert('fish2');&lt;/script&gt;<span class=\"js-signatureMarker\"></span><blockquote></blockquote>", 'signatureIdentifyByHtmlHelper does not reactivate alert')
 });

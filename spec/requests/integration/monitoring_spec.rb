@@ -27,7 +27,7 @@ RSpec.describe 'Monitoring', type: :request do
       channel.last_log_out = nil
       channel.save!
     end
-    dir = Rails.root.join('tmp', 'unprocessable_mail')
+    dir = Rails.root.join('tmp/unprocessable_mail')
     Dir.glob("#{dir}/*.eml") do |entry|
       File.delete(entry)
     end
@@ -457,7 +457,7 @@ RSpec.describe 'Monitoring', type: :request do
       travel_back
 
       # health_check - unprocessable mail
-      dir = Rails.root.join('tmp', 'unprocessable_mail')
+      dir = Rails.root.join('tmp/unprocessable_mail')
       FileUtils.mkdir_p(dir)
       FileUtils.touch("#{dir}/test.eml")
 
@@ -527,7 +527,7 @@ RSpec.describe 'Monitoring', type: :request do
       Delayed::Job.destroy_all
 
       # add a new object
-      object = create(:object_manager_attribute_text)
+      object = create(:object_manager_attribute_text, name: 'test4')
 
       migration = ObjectManager::Attribute.migration_execute
       expect(true).to eq(migration)

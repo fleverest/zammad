@@ -3,7 +3,8 @@
 class UsersController < ApplicationController
   include ChecksUserAttributesByCurrentUserPermission
 
-  prepend_before_action :authentication_check, except: %i[create password_reset_send password_reset_verify image]
+  prepend_before_action -> { authorize! }, only: %i[import_example import_start search history]
+  prepend_before_action :authentication_check, except: %i[create password_reset_send password_reset_verify image email_verify email_verify_send]
   prepend_before_action :authentication_check_only, only: [:create]
 
   # @path       [GET] /users
@@ -27,12 +28,7 @@ class UsersController < ApplicationController
       per_page = 500
     end
 
-    # only allow customer to fetch him self
-    users = if !current_user.permissions?(['admin.user', 'ticket.agent'])
-              User.where(id: current_user.id).order(id: :asc).offset(offset).limit(per_page)
-            else
-              User.all.order(id: :asc).offset(offset).limit(per_page)
-            end
+    users = policy_scope(User).order(id: :asc).offset(offset).limit(per_page)
 
     if response_expand?
       list = []
@@ -78,7 +74,7 @@ class UsersController < ApplicationController
   # @response_message 401        Invalid session.
   def show
     user = User.find(params[:id])
-    access!(user, 'read')
+    authorize!(user)
 
     if response_expand?
       result = user.attributes_with_association_names
@@ -143,6 +139,15 @@ class UsersController < ApplicationController
       # check if user already exists
       exists = User.exists?(email: clean_params[:email].downcase.strip)
       raise Exceptions::UnprocessableEntity, "Email address '#{clean_params[:email].downcase.strip}' is already used for other user." if exists
+
+      # check password policy
+      if clean_params[:password].present?
+        result = password_policy(clean_params[:password])
+        if result != true
+          render json: { error: result }, status: :unprocessable_entity
+          return
+        end
+      end
 
       user = User.new(clean_params)
       user.associations_from_param(params)
@@ -263,7 +268,7 @@ class UsersController < ApplicationController
   # @response_message 401        Invalid session.
   def update
     user = User.find(params[:id])
-    access!(user, 'change')
+    authorize!(user)
 
     # permission check
     check_attributes_by_current_user_permission(params)
@@ -312,7 +317,7 @@ class UsersController < ApplicationController
   # @response_message 401 Invalid session.
   def destroy
     user = User.find(params[:id])
-    access!(user, 'delete')
+    authorize!(user)
 
     model_references_check(User, params)
     model_destroy_render(User, params)
@@ -367,8 +372,6 @@ class UsersController < ApplicationController
   # @response_message 200 [Array<User>] A list of User records matching the search term.
   # @response_message 401               Invalid session.
   def search
-    raise Exceptions::NotAuthorized if !current_user.permissions?(['ticket.agent', 'admin.user'])
-
     per_page = params[:per_page] || params[:limit] || 100
     per_page = per_page.to_i
     if per_page > 500
@@ -472,8 +475,6 @@ class UsersController < ApplicationController
   # @response_message 200 [History] The History records of the requested User record.
   # @response_message 401           Invalid session.
   def history
-    raise Exceptions::NotAuthorized if !current_user.permissions?(['admin.user', 'ticket.agent'])
-
     # get user data
     user = User.find(params[:id])
 
@@ -507,6 +508,8 @@ curl http://localhost/api/v1/users/email_verify -v -u #{login}:#{password} -H "C
     user = User.signup_verify_via_token(params[:token], current_user)
     raise Exceptions::UnprocessableEntity, 'Invalid token!' if !user
 
+    current_user_set(user)
+
     render json: { message: 'ok', user_email: user.email }, status: :ok
   end
 
@@ -534,14 +537,12 @@ curl http://localhost/api/v1/users/email_verify_send -v -u #{login}:#{password} 
 
     raise Exceptions::UnprocessableEntity, 'No email!' if !params[:email]
 
-    # check is verify is possible to send
     user = User.find_by(email: params[:email].downcase)
-    raise Exceptions::UnprocessableEntity, 'No such user!' if !user
-
-    #if user.verified == true
-    #  render json: { error: 'Already verified!' }, status: :unprocessable_entity
-    #  return
-    #end
+    if !user || user.verified == true
+      # result is always positive to avoid leaking of existing user accounts
+      render json: { message: 'ok' }, status: :ok
+      return
+    end
 
     Token.create(action: 'Signup', user_id: user.id)
 
@@ -597,11 +598,16 @@ curl http://localhost/api/v1/users/password_reset -v -u #{login}:#{password} -H 
     result = User.password_reset_new_token(params[:username])
     if result && result[:token]
 
-      # send mail
-      user = result[:user]
+      # unable to send email
+      if !result[:user] || result[:user].email.blank?
+        render json: { message: 'failed' }, status: :ok
+        return
+      end
+
+      # send password reset emails
       NotificationFactory::Mailer.notification(
         template: 'password_reset',
-        user:     user,
+        user:     result[:user],
         objects:  result
       )
 
@@ -610,14 +616,10 @@ curl http://localhost/api/v1/users/password_reset -v -u #{login}:#{password} -H 
         render json: { message: 'ok', token: result[:token].name }, status: :ok
         return
       end
-
-      # token sent to user, send ok to browser
-      render json: { message: 'ok' }, status: :ok
-      return
     end
 
-    # unable to generate token
-    render json: { message: 'failed' }, status: :ok
+    # result is always positive to avoid leaking of existing user accounts
+    render json: { message: 'ok' }, status: :ok
   end
 
 =begin
@@ -642,38 +644,48 @@ curl http://localhost/api/v1/users/password_reset_verify -v -u #{login}:#{passwo
 =end
 
   def password_reset_verify
-    if params[:password]
 
-      # check password policy
-      result = password_policy(params[:password])
-      if result != true
-        render json: { message: 'failed', notice: result }, status: :ok
+    # check if feature is enabled
+    raise Exceptions::UnprocessableEntity, 'Feature not enabled!' if !Setting.get('user_lost_password')
+    raise Exceptions::UnprocessableEntity, 'token param needed!' if params[:token].blank?
+
+    # if no password is given, verify token only
+    if params[:password].blank?
+      user = User.by_reset_token(params[:token])
+      if user
+        render json: { message: 'ok', user_login: user.login }, status: :ok
         return
       end
-
-      # set new password with token
-      user = User.password_reset_via_token(params[:token], params[:password])
-
-      # send mail
-      if user
-        NotificationFactory::Mailer.notification(
-          template: 'password_change',
-          user:     user,
-          objects:  {
-            user:         user,
-            current_user: current_user,
-          }
-        )
-      end
-
-    else
-      user = User.by_reset_token(params[:token])
-    end
-    if user
-      render json: { message: 'ok', user_login: user.login }, status: :ok
-    else
       render json: { message: 'failed' }, status: :ok
+      return
     end
+
+    # check password policy
+    result = password_policy(params[:password])
+    if result != true
+      render json: { message: 'failed', notice: result }, status: :ok
+      return
+    end
+
+    # set new password with token
+    user = User.password_reset_via_token(params[:token], params[:password])
+
+    # send mail
+    if !user || user.email.blank?
+      render json: { message: 'failed' }, status: :ok
+      return
+    end
+
+    NotificationFactory::Mailer.notification(
+      template: 'password_change',
+      user:     user,
+      objects:  {
+        user:         user,
+        current_user: current_user,
+      }
+    )
+
+    render json: { message: 'ok', user_login: user.login }, status: :ok
   end
 
 =begin
@@ -725,14 +737,16 @@ curl http://localhost/api/v1/users/password_change -v -u #{login}:#{password} -H
 
     user.update!(password: params[:password_new])
 
-    NotificationFactory::Mailer.notification(
-      template: 'password_change',
-      user:     user,
-      objects:  {
-        user:         user,
-        current_user: current_user,
-      }
-    )
+    if user.email.present?
+      NotificationFactory::Mailer.notification(
+        template: 'password_change',
+        user:     user,
+        objects:  {
+          user:         user,
+          current_user: current_user,
+        }
+      )
+    end
 
     render json: { message: 'ok', user_login: user.login }, status: :ok
   end
@@ -759,8 +773,6 @@ curl http://localhost/api/v1/users/preferences -v -u #{login}:#{password} -H "Co
 =end
 
   def preferences
-    raise Exceptions::UnprocessableEntity, 'No current user!' if !current_user
-
     preferences_params = params.except(:controller, :action)
 
     if preferences_params.present?
@@ -800,8 +812,6 @@ curl http://localhost/api/v1/users/out_of_office -v -u #{login}:#{password} -H "
 =end
 
   def out_of_office
-    raise Exceptions::UnprocessableEntity, 'No current user!' if !current_user
-
     user = User.find(current_user.id)
     user.with_lock do
       user.assign_attributes(
@@ -838,8 +848,6 @@ curl http://localhost/api/v1/users/account -v -u #{login}:#{password} -H "Conten
 =end
 
   def account_remove
-    raise Exceptions::UnprocessableEntity, 'No current user!' if !current_user
-
     # provider + uid to remove
     raise Exceptions::UnprocessableEntity, 'provider needed!' if !params[:provider]
     raise Exceptions::UnprocessableEntity, 'uid needed!' if !params[:uid]
@@ -918,8 +926,6 @@ curl http://localhost/api/v1/users/avatar -v -u #{login}:#{password} -H "Content
 =end
 
   def avatar_new
-    return if !valid_session_with_user
-
     # get & validate image
     file_full   = StaticAssets.data_url_attributes(params[:avatar_full])
     file_resize = StaticAssets.data_url_attributes(params[:avatar_resize])
@@ -947,8 +953,6 @@ curl http://localhost/api/v1/users/avatar -v -u #{login}:#{password} -H "Content
   end
 
   def avatar_set_default
-    return if !valid_session_with_user
-
     # get & validate image
     raise Exceptions::UnprocessableEntity, 'No id of avatar!' if !params[:id]
 
@@ -963,8 +967,6 @@ curl http://localhost/api/v1/users/avatar -v -u #{login}:#{password} -H "Content
   end
 
   def avatar_destroy
-    return if !valid_session_with_user
-
     # get & validate image
     raise Exceptions::UnprocessableEntity, 'No id of avatar!' if !params[:id]
 
@@ -980,8 +982,6 @@ curl http://localhost/api/v1/users/avatar -v -u #{login}:#{password} -H "Content
   end
 
   def avatar_list
-    return if !valid_session_with_user
-
     # list of avatars
     result = Avatar.list('User', current_user.id)
     render json: { avatars: result }, status: :ok
@@ -996,7 +996,6 @@ curl http://localhost/api/v1/users/avatar -v -u #{login}:#{password} -H "Content
   # @response_message 200 File download.
   # @response_message 401 Invalid session.
   def import_example
-    permission_check('admin.user')
     send_data(
       User.csv_example,
       filename:    'user-example.csv',
@@ -1015,7 +1014,6 @@ curl http://localhost/api/v1/users/avatar -v -u #{login}:#{password} -H "Content
   # @response_message 201 Import started.
   # @response_message 401 Invalid session.
   def import_start
-    permission_check('admin.user')
     string = params[:data]
     if string.blank? && params[:file].present?
       string = params[:file].read.force_encoding('utf-8')
@@ -1037,13 +1035,13 @@ curl http://localhost/api/v1/users/avatar -v -u #{login}:#{password} -H "Content
 
   def password_policy(password)
     if Setting.get('password_min_size').to_i > password.length
-      return ["Can\'t update password, it must be at least %s characters long!", Setting.get('password_min_size')]
+      return ['Invalid password, it must be at least %s characters long!', Setting.get('password_min_size')]
     end
     if Setting.get('password_need_digit').to_i == 1 && password !~ /\d/
-      return ["Can't update password, it must contain at least 1 digit!"]
+      return ['Invalid password, it must contain at least 1 digit!']
     end
     if Setting.get('password_min_2_lower_2_upper_characters').to_i == 1 && ( password !~ /[A-Z].*[A-Z]/ || password !~ /[a-z].*[a-z]/ )
-      return ["Can't update password, it must contain at least 2 lowercase and 2 uppercase characters!"]
+      return ['Invalid password, it must contain at least 2 lowercase and 2 uppercase characters!']
     end
 
     true

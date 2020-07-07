@@ -226,7 +226,7 @@ returns
       # see specs for example
       return [] if !text.is_a?(String)
 
-      text.scan(/([\d|\s|\-|\(|\)]{6,26})/).map do |match|
+      text.scan(/([\d|\s|\-|(|)]{6,26})/).map do |match|
         normalize_number(match[0])
       end
     end
@@ -237,9 +237,9 @@ returns
       number.gsub!(/\D/, '')
       case number
       when /^00/
-        number[2..-1]
+        number[2..]
       when /^0/
-        DEFAULT_COUNTRY_ID + number[1..-1]
+        DEFAULT_COUNTRY_ID + number[1..]
       else
         number
       end

@@ -7,6 +7,8 @@ require 'models/concerns/has_groups_permissions_examples'
 require 'models/concerns/has_xss_sanitized_note_examples'
 require 'models/concerns/can_be_imported_examples'
 require 'models/concerns/has_object_manager_attributes_validation_examples'
+require 'models/user/has_ticket_create_screen_impact_examples'
+require 'models/user/can_lookup_search_index_attributes_examples'
 
 RSpec.describe User, type: :model do
   subject(:user) { create(:user) }
@@ -23,6 +25,8 @@ RSpec.describe User, type: :model do
   it_behaves_like 'HasGroups and Permissions', group_access_no_permission_factory: :user
   it_behaves_like 'CanBeImported'
   it_behaves_like 'HasObjectManagerAttributesValidation'
+  it_behaves_like 'HasTicketCreateScreenImpact'
+  it_behaves_like 'CanLookupSearchIndexAttributes'
 
   describe 'Class methods:' do
     describe '.authenticate' do
@@ -365,139 +369,6 @@ RSpec.describe User, type: :model do
       end
     end
 
-    describe '#access?' do
-      context 'when an admin' do
-        subject(:user) { create(:user, roles: [partial_admin_role]) }
-
-        context 'with "admin.user" privileges' do
-          let(:partial_admin_role) do
-            create(:role).tap { |role| role.permission_grant('admin.user') }
-          end
-
-          context 'wants to read, change, or delete any user' do
-            it 'returns true' do
-              expect(admin.access?(user, 'read')).to be(true)
-              expect(admin.access?(user, 'change')).to be(true)
-              expect(admin.access?(user, 'delete')).to be(true)
-              expect(agent.access?(user, 'read')).to be(true)
-              expect(agent.access?(user, 'change')).to be(true)
-              expect(agent.access?(user, 'delete')).to be(true)
-              expect(customer.access?(user, 'read')).to be(true)
-              expect(customer.access?(user, 'change')).to be(true)
-              expect(customer.access?(user, 'delete')).to be(true)
-              expect(user.access?(user, 'read')).to be(true)
-              expect(user.access?(user, 'change')).to be(true)
-              expect(user.access?(user, 'delete')).to be(true)
-            end
-          end
-        end
-
-        context 'without "admin.user" privileges' do
-          let(:partial_admin_role) do
-            create(:role).tap { |role| role.permission_grant('admin.tag') }
-          end
-
-          context 'wants to read any user' do
-            it 'returns true' do
-              expect(admin.access?(user, 'read')).to be(true)
-              expect(agent.access?(user, 'read')).to be(true)
-              expect(customer.access?(user, 'read')).to be(true)
-              expect(user.access?(user, 'read')).to be(true)
-            end
-          end
-
-          context 'wants to change or delete any user' do
-            it 'returns false' do
-              expect(admin.access?(user, 'change')).to be(false)
-              expect(admin.access?(user, 'delete')).to be(false)
-              expect(agent.access?(user, 'change')).to be(false)
-              expect(agent.access?(user, 'delete')).to be(false)
-              expect(customer.access?(user, 'change')).to be(false)
-              expect(customer.access?(user, 'delete')).to be(false)
-              expect(user.access?(user, 'change')).to be(false)
-              expect(user.access?(user, 'delete')).to be(false)
-            end
-          end
-        end
-      end
-
-      context 'when an agent' do
-        subject(:user) { create(:agent_user) }
-
-        context 'wants to read any user' do
-          it 'returns true' do
-            expect(admin.access?(user, 'read')).to be(true)
-            expect(agent.access?(user, 'read')).to be(true)
-            expect(customer.access?(user, 'read')).to be(true)
-            expect(user.access?(user, 'read')).to be(true)
-          end
-        end
-
-        context 'wants to change' do
-          context 'any admin or agent' do
-            it 'returns false' do
-              expect(admin.access?(user, 'change')).to be(false)
-              expect(agent.access?(user, 'change')).to be(false)
-              expect(user.access?(user, 'change')).to be(false)
-            end
-          end
-
-          context 'any customer' do
-            it 'returns true' do
-              expect(customer.access?(user, 'change')).to be(true)
-            end
-          end
-        end
-
-        context 'wants to delete any user' do
-          it 'returns false' do
-            expect(admin.access?(user, 'delete')).to be(false)
-            expect(agent.access?(user, 'delete')).to be(false)
-            expect(customer.access?(user, 'delete')).to be(false)
-            expect(user.access?(user, 'delete')).to be(false)
-          end
-        end
-      end
-
-      context 'when a customer' do
-        subject(:user) { create(:customer_user, :with_org) }
-
-        let(:colleague) { create(:customer_user, organization: user.organization) }
-
-        context 'wants to read' do
-          context 'any admin, agent, or customer from a different organization' do
-            it 'returns false' do
-              expect(admin.access?(user, 'read')).to be(false)
-              expect(agent.access?(user, 'read')).to be(false)
-              expect(customer.access?(user, 'read')).to be(false)
-            end
-          end
-
-          context 'any customer from the same organization' do
-            it 'returns true' do
-              expect(user.access?(user, 'read')).to be(true)
-              expect(colleague.access?(user, 'read')).to be(true)
-            end
-          end
-        end
-
-        context 'wants to change or delete any user' do
-          it 'returns false' do
-            expect(admin.access?(user, 'change')).to be(false)
-            expect(admin.access?(user, 'delete')).to be(false)
-            expect(agent.access?(user, 'change')).to be(false)
-            expect(agent.access?(user, 'delete')).to be(false)
-            expect(customer.access?(user, 'change')).to be(false)
-            expect(customer.access?(user, 'delete')).to be(false)
-            expect(colleague.access?(user, 'change')).to be(false)
-            expect(colleague.access?(user, 'delete')).to be(false)
-            expect(user.access?(user, 'change')).to be(false)
-            expect(user.access?(user, 'delete')).to be(false)
-          end
-        end
-      end
-    end
-
     describe '#permissions?' do
       subject(:user) { create(:user, roles: [role]) }
 
@@ -647,10 +518,20 @@ RSpec.describe User, type: :model do
       context 'with no #preferences[:locale]' do
         let(:preferences) { {} }
 
-        before { Setting.set('locale_default', 'foo') }
+        context 'with default locale' do
+          before { Setting.set('locale_default', 'foo') }
 
-        it 'returns the system-wide default locale' do
-          expect(user.locale).to eq('foo')
+          it 'returns the system-wide default locale' do
+            expect(user.locale).to eq('foo')
+          end
+        end
+
+        context 'without default locale' do
+          before { Setting.set('locale_default', nil) }
+
+          it 'returns en-us' do
+            expect(user.locale).to eq('en-us')
+          end
         end
       end
 
@@ -1132,26 +1013,14 @@ RSpec.describe User, type: :model do
     end
 
     describe 'Touching associations on update:' do
-      subject(:user) { create(:customer_user, organization: organization) }
+      subject!(:user) { create(:customer_user) }
 
-      let(:organization) { create(:organization) }
-      let(:other_customer) { create(:customer_user) }
+      let!(:organization) { create(:organization) }
 
-      context 'when basic attributes are updated' do
+      context 'when a customer gets a organization' do
         it 'touches its organization' do
-          expect { user.update(firstname: 'foo') }
+          expect { user.update(organization: organization) }
             .to change { organization.reload.updated_at }
-        end
-      end
-
-      context 'when organization has 100+ other members' do
-        let!(:other_members) { create_list(:user, 100, organization: organization) }
-
-        context 'and basic attributes are updated' do
-          it 'does not touch its organization' do
-            expect { user.update(firstname: 'foo') }
-              .to not_change { organization.reload.updated_at }
-          end
         end
       end
     end

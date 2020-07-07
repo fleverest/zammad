@@ -252,61 +252,93 @@ RSpec.describe Ticket, type: :model do
           end
         end
       end
-    end
 
-    describe '#access?' do
-      context 'when given ticket’s owner' do
-        it 'returns true for both "read" and "full" privileges' do
-          expect(ticket.access?(ticket.owner, 'read')).to be(true)
-          expect(ticket.access?(ticket.owner, 'full')).to be(true)
-        end
-      end
+      context 'with a notification trigger' do
+        # https://github.com/zammad/zammad/issues/2782
+        #
+        # Notification triggers should log notification as private or public
+        # according to given configuration
+        let(:user) { create(:admin_user, mobile: '+37061010000') }
 
-      context 'when given the ticket’s customer' do
-        it 'returns true for both "read" and "full" privileges' do
-          expect(ticket.access?(ticket.customer, 'read')).to be(true)
-          expect(ticket.access?(ticket.customer, 'full')).to be(true)
-        end
-      end
+        before { ticket.group.users << user }
 
-      context 'when given a user that is neither owner nor customer' do
-        let(:user) { create(:agent_user) }
-
-        it 'returns false for both "read" and "full" privileges' do
-          expect(ticket.access?(user, 'read')).to be(false)
-          expect(ticket.access?(user, 'full')).to be(false)
+        let(:perform) do
+          {
+            notification_key => {
+              body:      'Old programmers never die. They just branch to a new address.',
+              recipient: 'ticket_agents',
+              subject:   'Old programmers never die. They just branch to a new address.'
+            }
+          }.deep_merge(additional_options).deep_stringify_keys
         end
 
-        context 'but the user is an agent with full access to ticket’s group' do
-          before { user.group_names_access_map = { ticket.group.name => 'full' } }
+        let(:notification_key) { "notification.#{notification_type}" }
 
-          it 'returns true for both "read" and "full" privileges' do
-            expect(ticket.access?(user, 'read')).to be(true)
-            expect(ticket.access?(user, 'full')).to be(true)
-          end
-        end
+        shared_examples 'verify log visibility status' do
+          shared_examples 'notification trigger' do
+            it 'adds Ticket::Article' do
+              expect { ticket.perform_changes(perform, 'trigger', ticket, user) }
+                .to change { ticket.articles.count }.by(1)
+            end
 
-        context 'but the user is a customer from the same organization as ticket’s customer' do
-          subject(:ticket) { create(:ticket, customer: customer) }
-
-          let(:customer) { create(:customer_user, organization: create(:organization)) }
-          let(:colleague) { create(:customer_user, organization: customer.organization) }
-
-          context 'and organization.shared is true (default)' do
-            it 'returns true for both "read" and "full" privileges' do
-              expect(ticket.access?(colleague, 'read')).to be(true)
-              expect(ticket.access?(colleague, 'full')).to be(true)
+            it 'new Ticket::Article visibility reflects setting' do
+              ticket.perform_changes(perform, 'trigger', ticket, User.first)
+              new_article = ticket.articles.reload.last
+              expect(new_article.internal).to be target_internal_value
             end
           end
 
-          context 'but organization.shared is false' do
-            before { customer.organization.update(shared: false) }
-
-            it 'returns false for both "read" and "full" privileges' do
-              expect(ticket.access?(colleague, 'read')).to be(false)
-              expect(ticket.access?(colleague, 'full')).to be(false)
+          context 'when set to private' do
+            let(:additional_options) do
+              {
+                notification_key => {
+                  internal: true
+                }
+              }
             end
+
+            let(:target_internal_value) { true }
+
+            it_behaves_like 'notification trigger'
           end
+
+          context 'when set to internal' do
+            let(:additional_options) do
+              {
+                notification_key => {
+                  internal: false
+                }
+              }
+            end
+
+            let(:target_internal_value) { false }
+
+            it_behaves_like 'notification trigger'
+          end
+
+          context 'when no selection was made' do # ensure previously created triggers default to public
+            let(:additional_options) do
+              {}
+            end
+
+            let(:target_internal_value) { false }
+
+            it_behaves_like 'notification trigger'
+          end
+        end
+
+        context 'dispatching email' do
+          let(:notification_type) { :email }
+
+          include_examples 'verify log visibility status'
+        end
+
+        context 'dispatching SMS' do
+          let(:notification_type) { :sms }
+
+          before { create(:channel, area: 'Sms::Notification') }
+
+          include_examples 'verify log visibility status'
         end
       end
     end
@@ -805,20 +837,6 @@ RSpec.describe Ticket, type: :model do
             .and change { other_organization.reload.updated_at }
         end
       end
-
-      context 'when organization has 100+ members' do
-        let!(:other_members) { create_list(:user, 100, organization: organization) }
-
-        context 'and customer association is changed' do
-          it 'touches both old and new customer, and their organizations' do
-            expect { ticket.update(customer: other_customer) }
-              .to change { customer.reload.updated_at }
-              .and change { organization.reload.updated_at }
-              .and change { other_customer.reload.updated_at }
-              .and change { other_organization.reload.updated_at }
-          end
-        end
-      end
     end
 
     describe 'Association & attachment management:' do
@@ -891,7 +909,7 @@ RSpec.describe Ticket, type: :model do
       context 'when ticket is generated from email (with attachments)' do
         subject(:ticket) { Channel::EmailParser.new.process({}, raw_email).first }
 
-        let(:raw_email) { File.read(Rails.root.join('test', 'data', 'mail', 'mail001.box')) }
+        let(:raw_email) { File.read(Rails.root.join('test/data/mail/mail001.box')) }
 
         it 'adds attachments to the Store{::File,::Provider::DB} tables' do
           expect { ticket }
@@ -932,9 +950,7 @@ RSpec.describe Ticket, type: :model do
                 .and change { Store::File.count }.by(0)
                 .and change { Store::Provider::DB.count }.by(0)
             end
-          end
 
-          context 'when only the duplicate ticket is destroyed' do
             it 'deletes all related attachments' do
               duplicate.destroy
 

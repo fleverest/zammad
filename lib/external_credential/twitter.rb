@@ -29,11 +29,14 @@ class ExternalCredential::Twitter
     begin
       request_token = consumer.get_request_token(oauth_callback: ExternalCredential.callback_url('twitter'))
     rescue => e
-      if e.message == '403 Forbidden'
-        raise "#{e.message}, maybe credentials wrong or callback_url for application wrong configured."
+      case e.message
+      when '401 Authorization Required'
+        raise "#{e.message} (Invalid credentials may be to blame.)"
+      when '403 Forbidden'
+        raise "#{e.message} (Your app's callback URL configuration on developer.twitter.com may be to blame.)"
+      else
+        raise
       end
-
-      raise e
     end
 
     {
@@ -157,9 +160,9 @@ class ExternalCredential::Twitter
     rescue
       begin
         webhooks = client.webhooks
-        raise "Unable to get list of webooks. You use the wrong 'Dev environment label', only #{webhooks.inspect} available."
-      rescue => e
-        raise "Unable to get list of webooks. Maybe you do not have an Twitter developer approval right now or you use the wrong 'Dev environment label': #{e.message}"
+        raise "Dev Environment Label invalid. Please use an existing one #{webhooks[:environments].map { |e| e[:environment_name] }}, or create a new one."
+      rescue Twitter::Error => e
+        raise "#{e.message} Are you sure you created a development environment on developer.twitter.com?"
       end
     end
     webhook_id = nil

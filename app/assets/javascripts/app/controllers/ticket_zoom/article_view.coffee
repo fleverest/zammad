@@ -81,11 +81,13 @@ class ArticleViewItem extends App.ObserverController
     '.textBubble-overflowContainer': 'textBubbleOverflowContainer'
 
   events:
-    'click .textBubble':           'toggleMetaWithDelay'
-    'click .textBubble a':         'stopPropagation'
-    'click .js-toggleFold':        'toggleFold'
-    'click .richtext-content img': 'imageView'
-    'click .attachments img':      'imageView'
+    'click .article-meta-permanent':  'toggleMetaWithDelay'
+    'click .textBubble':              'toggleMetaWithDelay'
+    'click .textBubble a':            'stopPropagation'
+    'click .js-toggleFold':           'toggleFold'
+    'click .richtext-content img':    'imageView'
+    'click .attachments img':         'imageView'
+    'click .js-securityRetryProcess': 'retrySecurityProcess'
 
   constructor: ->
     super
@@ -134,7 +136,12 @@ class ArticleViewItem extends App.ObserverController
     attachments = App.TicketArticle.contentAttachments(article)
     if article.attachments
       for attachment in article.attachments
-        attachment.url = "#{App.Config.get('api_path')}/ticket_attachment/#{article.ticket_id}/#{article.id}/#{attachment.id}?disposition=attachment"
+
+        dispositionParams = ''
+        if attachment?.preferences['Content-Type'] isnt 'application/pdf' && attachment?.preferences['Content-Type'] isnt 'text/html'
+          dispositionParams = '?disposition=attachment'
+
+        attachment.url = "#{App.Config.get('api_path')}/ticket_attachment/#{article.ticket_id}/#{article.id}/#{attachment.id}#{dispositionParams}"
         attachment.preview_url = "#{App.Config.get('api_path')}/ticket_attachment/#{article.ticket_id}/#{article.id}/#{attachment.id}?view=preview"
 
         if attachment && attachment.preferences && attachment.preferences['original-format'] is true
@@ -290,6 +297,46 @@ class ArticleViewItem extends App.ObserverController
       bubbleOverflowContainer.removeClass('hide')
     else
       bubbleOverflowContainer.addClass('hide')
+
+  retrySecurityProcess: (e) ->
+    e.preventDefault()
+    e.stopPropagation()
+
+    article_id = $(e.target).closest('.ticket-article-item').data('id')
+
+    @ajax(
+      id:   'retrySecurityProcess'
+      type: 'POST'
+      url:  "#{@apiPath}/ticket_articles/#{article_id}/retry_security_process"
+      processData: true
+      success: (data, status, xhr) =>
+        if data.sign.success
+          @notify
+            type: 'success'
+            msg:  App.i18n.translateContent('Verify sign success!')
+        else if data.sign.comment
+          comment = App.i18n.translateContent('Verify sign failed!') + ' ' + App.i18n.translateContent(data.sign.comment || '')
+          @notify
+            type: 'error'
+            msg: comment
+            timeout: 2000
+
+        if data.encryption.success
+          @notify
+            type: 'success'
+            msg:  App.i18n.translateContent('Decryption success!')
+        else if data.encryption.comment
+          comment = App.i18n.translateContent('Decryption failed!') + ' ' + App.i18n.translateContent(data.encryption.comment || '')
+          @notify
+            type: 'error'
+            msg:  comment
+            timeout: 2000
+
+      error: (xhr) =>
+        @notify
+          type: 'error'
+          msg:  App.i18n.translateContent('Retry security process failed!')
+    )
 
   stopPropagation: (e) ->
     e.stopPropagation()

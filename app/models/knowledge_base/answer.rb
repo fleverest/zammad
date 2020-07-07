@@ -5,6 +5,7 @@ class KnowledgeBase::Answer < ApplicationModel
   include CanBePublished
   include HasKnowledgeBaseAttachmentPermissions
   include ChecksKbClientNotification
+  include CanCloneAttachments
 
   AGENT_ALLOWED_ATTRIBUTES       = %i[category_id promoted internal_note].freeze
   AGENT_ALLOWED_NESTED_RELATIONS = %i[translations].freeze
@@ -61,8 +62,44 @@ class KnowledgeBase::Answer < ApplicationModel
     attachments.sort_by { |elem| elem.filename.downcase }
   end
 
+  def add_attachment(file)
+    filename     = file.try(:original_filename) || File.basename(file.path)
+    content_type = file.try(:content_type) || MIME::Types.type_for(filename).first&.content_type || 'application/octet-stream'
+
+    Store.add(
+      object:      self.class.name,
+      o_id:        id,
+      data:        file.read,
+      filename:    filename,
+      preferences: { 'Content-Type': content_type }
+    )
+
+    touch # rubocop:disable Rails/SkipsModelValidations
+    translations.each(&:touch)
+
+    true
+  end
+
+  def remove_attachment(attachment_id)
+    attachment = attachments.find { |elem| elem.id == attachment_id.to_i }
+
+    raise ActiveRecord::RecordNotFound if attachment.nil?
+
+    Store.remove_item(attachment.id)
+
+    touch # rubocop:disable Rails/SkipsModelValidations
+    translations.each(&:touch)
+
+    true
+  end
+
   def api_url
     Rails.application.routes.url_helpers.knowledge_base_answer_path(category.knowledge_base, self)
+  end
+
+  # required by CanCloneAttachments
+  def content_type
+    'text/html'
   end
 
   private
